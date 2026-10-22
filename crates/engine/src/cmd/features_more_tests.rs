@@ -620,6 +620,32 @@ fn coil_and_loft_to_a_point() {
     assert!(s.execute("solid.loft", &json!({"sections": [{"sketch": "Base"}, {"sketch": "Top", "point": "nope"}]})).is_err());
 }
 
+/// A square coil cut 1 mm into a cylinder, running out through its top face (#3962: twenty
+/// turns round a Ø40 tube). Each wall of the coil is one B-spline surface as long as the coil;
+/// the cut searched those from a grid too coarse for many turns, settled on the next turn and
+/// failed, after retries that took minutes (six turns failed after half a minute).
+#[test]
+fn square_coil_cut_into_a_cylinder_it_overlaps() {
+    use std::f64::consts::{PI, TAU};
+    let (pitch, turns) = (15.24, 6.0);
+    let height = pitch * turns - 0.3;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": height, "body_name": "Stock"}));
+    let coil =
+        json!({"diameter": 51, "pitch": pitch, "turns": turns, "section": "square", "section_size": 13, "base": [0, 0, 12], "body_name": "Tool"});
+    run(&mut s, "solid.coil", coil);
+    run(&mut s, "solid.combine", json!({"operation": "cut", "target": "Stock", "tools": ["Tool"]}));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1);
+    assert!(state.body("Stock").is_some_and(|b| b.body.validity().is_empty()));
+    // The groove: the section's overlap, radius 19 to 20 (∫ r dr = 19.5) and 13 mm along the
+    // axis, turned 2π / pitch per mm it rises, from its centre at 12 until it runs out through
+    // the top face over its last 13 mm.
+    let groove = 19.5 * TAU / pitch * (13.0 * (height - 6.5 - 12.0) + 13.0 * 13.0 / 2.0);
+    let removed = PI * 400.0 * height - volume(&mut s);
+    assert!(rel(removed, groove) < 1e-2, "{removed} vs {groove}");
+}
+
 /// A 3 mm shelled basin (100 x 60 x 30, open top) with a fall lofted from its whole outline
 /// 10 up down to a drain pad (`pad`: corners, 1 up), in either section order. The loft's top
 /// edges lie on the outer walls; the cut used to fail for one order of the sections (an

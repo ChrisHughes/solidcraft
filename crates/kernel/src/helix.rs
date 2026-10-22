@@ -249,6 +249,33 @@ mod tests {
     }
 
     #[test]
+    fn a_point_on_a_long_coil_wall_is_found_on_its_own_turn() {
+        // Each wall of a 20-turn coil is one B-spline surface, 240 spans along the helix. The
+        // search from nothing started at the nearest sample of a 50 × 50 grid, about one sample
+        // every 140° of the helix: the nearest lay on the next turn, 15 mm away, and the search
+        // settled there (the cut of such a coil into a cylinder failed, #3962).
+        use crate::body::from_p3;
+        use mt::{BoundedSurface, ParametricSurface, SearchNearestParameter};
+        let pl = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+        let (c, h) = (Vec2::new(25.5, 0.0), 6.5);
+        let square = Loop2::polygon(&[c + Vec2::new(-h, -h), c + Vec2::new(h, -h), c + Vec2::new(h, h), c + Vec2::new(-h, h)]);
+        let b = sweep_helix(&pl, &Region2 { outer: square, holes: vec![] }, Vec3::ZERO, Vec3::Z, 15.24, 20.0).unwrap();
+        let mut walls = 0;
+        for face in b.solid.face_iter() {
+            let mt::Surface::BSplineSurface(s) = face.surface() else { continue };
+            walls += 1;
+            let ((u0, u1), (v0, v1)) = s.range_tuple();
+            for i in 0..40 {
+                let (u, v) = (u0 + (u1 - u0) * (i as f64 + 0.37) / 40.0, (v0 + v1) / 2.0);
+                let p = s.subs(u, v);
+                let off = s.search_nearest_parameter(p, None, 100).map(|(u, v)| from_p3(s.subs(u, v)).dist(from_p3(p)));
+                assert!(off.is_some_and(|d| d < 1e-6), "wall {walls}, point {i} at u = {u}: {off:?}");
+            }
+        }
+        assert_eq!(walls, 4, "four helical walls");
+    }
+
+    #[test]
     fn pyramid() {
         let pl = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y };
         let lp = Loop2::polygon(&[Vec2::new(-20.0, -20.0), Vec2::new(20.0, -20.0), Vec2::new(20.0, 20.0), Vec2::new(-20.0, 20.0)]);

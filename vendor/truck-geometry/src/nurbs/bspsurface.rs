@@ -594,8 +594,17 @@ impl<P: ControlPoint<f64>> ParametricSurface for BSplineSurface<P> {
         } = self;
         let basis0 = uknot_vec.bspline_basis_functions(degree0, u);
         let basis1 = vknot_vec.bspline_basis_functions(degree1, v);
+        // SolidCraft: only the (degree + 1)² control points whose basis functions are non-zero at
+        // (u, v) are summed, here and in the derivatives below. Every control point was, so one
+        // evaluation of a long surface (a coil's wall, hundreds of points along it) cost hundreds
+        // of times what it needs; a term left out adds exactly zero.
         let closure = move |sum: P, (vec, b0): (&Vec<P>, f64)| {
-            let closure = move |sum: P, (pt, b1): (&P, &f64)| sum + pt.to_vec() * (b0 * b1);
+            if b0 == 0.0 {
+                return sum;
+            }
+            let closure = move |sum: P, (pt, b1): (&P, &f64)| {
+                if *b1 == 0.0 { sum } else { sum + pt.to_vec() * (b0 * b1) }
+            };
             vec.iter().zip(&basis1).fold(sum, closure)
         };
         control_points.iter().zip(basis0).fold(P::origin(), closure)
@@ -631,9 +640,12 @@ impl<P: ControlPoint<f64>> ParametricSurface for BSplineSurface<P> {
         let basis0 = uknot_vec.bspline_basis_functions(degree0 - 1, u);
         let basis1 = vknot_vec.bspline_basis_functions(degree1, v);
         let closure = move |sum: P::Diff, (i, b0): (usize, f64)| {
+            if b0 == 0.0 {
+                return sum;
+            }
             let coef = inv_or_zero(uknot_vec[i + degree0] - uknot_vec[i]);
             let closure = |sum: P::Diff, (j, b1): (usize, &f64)| {
-                sum + self.udelta_control_points(i, j) * coef * b0 * *b1
+                if *b1 == 0.0 { sum } else { sum + self.udelta_control_points(i, j) * coef * b0 * *b1 }
             };
             basis1.iter().enumerate().fold(sum, closure)
         };
@@ -674,9 +686,12 @@ impl<P: ControlPoint<f64>> ParametricSurface for BSplineSurface<P> {
         let basis0 = uknot_vec.bspline_basis_functions(degree0, u);
         let basis1 = vknot_vec.bspline_basis_functions(degree1 - 1, v);
         let closure = move |sum: P::Diff, (i, b0): (usize, f64)| {
+            if b0 == 0.0 {
+                return sum;
+            }
             let coef = inv_or_zero(vknot_vec[i + degree1] - vknot_vec[i]);
             let closure = |sum: P::Diff, (j, b1): (usize, &f64)| {
-                sum + self.vdelta_control_points(j, i) * coef * b0 * *b1
+                if *b1 == 0.0 { sum } else { sum + self.vdelta_control_points(j, i) * coef * b0 * *b1 }
             };
             basis0.iter().enumerate().fold(sum, closure)
         };
@@ -723,9 +738,12 @@ impl<P: ControlPoint<f64>> ParametricSurface for BSplineSurface<P> {
         let basis0 = uknot_vec.bspline_basis_functions(degree0 - 2, u);
         let basis1 = vknot_vec.bspline_basis_functions(degree1, v);
         let closure = move |sum: P::Diff, (i, b0): (usize, f64)| {
+            if b0 == 0.0 {
+                return sum;
+            }
             let coef = inv_or_zero(uknot_vec[i + degree0 - 1] - uknot_vec[i]);
             let closure = |sum: P::Diff, (j, b1): (usize, &f64)| {
-                sum + self.udelta2_control_points(i, j) * coef * b0 * *b1
+                if *b1 == 0.0 { sum } else { sum + self.udelta2_control_points(i, j) * coef * b0 * *b1 }
             };
             basis1.iter().enumerate().fold(sum, closure)
         };
@@ -776,9 +794,12 @@ impl<P: ControlPoint<f64>> ParametricSurface for BSplineSurface<P> {
         let basis0 = uknot_vec.bspline_basis_functions(degree0, u);
         let basis1 = vknot_vec.bspline_basis_functions(degree1 - 2, v);
         let closure = move |sum: P::Diff, (j, b0): (usize, f64)| {
+            if b0 == 0.0 {
+                return sum;
+            }
             let coef = inv_or_zero(vknot_vec[j + degree1 - 1] - vknot_vec[j]);
             let closure = |sum: P::Diff, (i, b1): (usize, &f64)| {
-                sum + self.vdelta2_control_points(i, j) * coef * b0 * *b1
+                if *b1 == 0.0 { sum } else { sum + self.vdelta2_control_points(i, j) * coef * b0 * *b1 }
             };
             basis0.iter().enumerate().fold(sum, closure)
         };
@@ -830,7 +851,13 @@ impl<P: ControlPoint<f64>> ParametricSurface for BSplineSurface<P> {
             let coef0 = inv_or_zero(uknot_vec[i + degree0] - uknot_vec[i]);
             let coef1 = inv_or_zero(uknot_vec[i + degree0 + 1] - uknot_vec[i + 1]);
             let b0 = basis0[i] * coef0 - basis0[i + 1] * coef1;
+            if b0 == 0.0 {
+                return sum;
+            }
             let closure = |sum: P::Diff, (j, pt): (usize, &P)| {
+                if basis1[j] == 0.0 && basis1[j + 1] == 0.0 {
+                    return sum;
+                }
                 let coef0 = inv_or_zero(vknot_vec[j + degree1] - vknot_vec[j]);
                 let coef1 = inv_or_zero(vknot_vec[j + degree1 + 1] - vknot_vec[j + 1]);
                 sum + pt.to_vec() * (basis1[j] * coef0 - basis1[j + 1] * coef1) * b0
@@ -1889,15 +1916,7 @@ impl SearchParameter<D2> for BSplineSurface<Point2> {
         hint: H,
         trials: usize,
     ) -> Option<(f64, f64)> {
-        let hint = match hint.into() {
-            SPHint2D::Parameter(x, y) => (x, y),
-            SPHint2D::Range(range0, range1) => {
-                algo::surface::presearch(self, point, (range0, range1), PRESEARCH_DIVISION)
-            }
-            SPHint2D::None => {
-                algo::surface::presearch(self, point, self.range_tuple(), PRESEARCH_DIVISION)
-            }
-        };
+        let hint = presearch_hint(self, point, hint.into());
         algo::surface::search_parameter2d(self, point, hint, trials)
     }
 }
@@ -1910,15 +1929,7 @@ impl SearchParameter<D2> for BSplineSurface<Point3> {
         hint: H,
         trials: usize,
     ) -> Option<(f64, f64)> {
-        let hint = match hint.into() {
-            SPHint2D::Parameter(x, y) => (x, y),
-            SPHint2D::Range(range0, range1) => {
-                algo::surface::presearch(self, point, (range0, range1), PRESEARCH_DIVISION)
-            }
-            SPHint2D::None => {
-                algo::surface::presearch(self, point, self.range_tuple(), PRESEARCH_DIVISION)
-            }
-        };
+        let hint = presearch_hint(self, point, hint.into());
         algo::surface::search_parameter3d(self, point, hint, trials)
     }
 }
@@ -1937,16 +1948,138 @@ where
         hint: H,
         trials: usize,
     ) -> Option<(f64, f64)> {
-        let hint = match hint.into() {
-            SPHint2D::Parameter(x, y) => (x, y),
-            SPHint2D::Range(range0, range1) => {
-                algo::surface::presearch(self, point, (range0, range1), PRESEARCH_DIVISION)
-            }
-            SPHint2D::None => {
-                algo::surface::presearch(self, point, self.range_tuple(), PRESEARCH_DIVISION)
-            }
-        };
+        let hint = presearch_hint(self, point, hint.into());
         algo::surface::search_nearest_parameter(self, point, hint, trials)
+    }
+}
+
+// SolidCraft: where a search for `point` starts: the hint, or the nearest sample of a grid over
+// the hinted range, or over the whole surface. truck's grid has `PRESEARCH_DIVISION` steps each
+// way. A surface with more knot spans than that along a direction (a coil's wall, twelve spans a
+// turn) had less than a sample a span there: on a coil of twenty turns the nearest sample lay on
+// the next turn, and the search settled there instead (#3962). The whole surface is now sampled
+// twice a span along such a direction (at most `MAX_PRESEARCH_STEPS` times); every other search
+// starts where it did. The grid is `presearch_grid`, which finds the same points as truck's.
+fn presearch_hint<P>(surface: &BSplineSurface<P>, point: P, hint: SPHint2D) -> (f64, f64)
+where
+    P: ControlPoint<f64> + MetricSpace<Metric = f64>,
+{
+    match hint {
+        SPHint2D::Parameter(x, y) => (x, y),
+        SPHint2D::Range(range0, range1) => {
+            presearch_grid(surface, point, (range0, range1), (PRESEARCH_DIVISION, PRESEARCH_DIVISION))
+        }
+        SPHint2D::None => {
+            let (u, v) = surface.knot_vecs();
+            presearch_grid(surface, point, surface.range_tuple(), (presearch_steps(u), presearch_steps(v)))
+        }
+    }
+}
+
+const MAX_PRESEARCH_STEPS: usize = 2048;
+
+fn presearch_steps(knot_vec: &KnotVec) -> usize {
+    let spans = knot_vec.windows(2).filter(|w| w[0] < w[1]).count();
+    (2 * spans).clamp(PRESEARCH_DIVISION, MAX_PRESEARCH_STEPS)
+}
+
+// SolidCraft: `algo::surface::presearch` with its own number of steps in each direction, and the
+// same nearest sample: of those nearest, the first in its order (rows of `u`, each across `v`).
+// The grid's basis functions are found once a row and once a column, and a sample sums only the
+// control points they do not vanish at, in the order `subs` sums them, so the samples are
+// `subs`'s points. The rows are taken a knot span at a time, nearest span first, and a span
+// whose control points lie in a ball wholly farther than the nearest sample found so far is
+// passed over: its samples lie in the hull of those control points, so in the ball. That holds
+// where the basis functions are non-negative and sum to one; anywhere else every row is taken.
+fn presearch_grid<P>(
+    surface: &BSplineSurface<P>,
+    point: P,
+    ((u0, u1), (v0, v1)): ((f64, f64), (f64, f64)),
+    (udiv, vdiv): (usize, usize),
+) -> (f64, f64)
+where
+    P: ControlPoint<f64> + MetricSpace<Metric = f64>,
+{
+    let (degree0, degree1) = surface.degrees();
+    let (uknot_vec, vknot_vec) = surface.knot_vecs();
+    let control_points = surface.control_points();
+    let at = |a: f64, b: f64, i: usize, n: usize| {
+        let p = i as f64 / n as f64;
+        a * (1.0 - p) + b * p
+    };
+    // The first basis function that does not vanish at `t`, those from it to the last one that
+    // does not, and whether they are a partition of unity there.
+    let window = |knot_vec: &KnotVec, degree: usize, t: f64| {
+        let basis = knot_vec.bspline_basis_functions(degree, t);
+        let first = basis.iter().position(|b| *b != 0.0).unwrap_or(basis.len());
+        let last = basis.iter().rposition(|b| *b != 0.0).map_or(first, |i| i + 1);
+        let basis = basis.get(first..last).unwrap_or_default().to_vec();
+        let unity = basis.iter().all(|b| *b >= 0.0) && (basis.iter().sum::<f64>() - 1.0).abs() < 1e-9;
+        (first, basis, unity)
+    };
+    let grid = |a: f64, b: f64, n: usize, knot_vec: &KnotVec, degree: usize| -> Vec<_> {
+        (0..=n).map(|i| at(a, b, i, n)).map(|t| (t, window(knot_vec, degree, t))).collect()
+    };
+    let (rows, columns) = (grid(u0, u1, udiv, uknot_vec, degree0), grid(v0, v1, vdiv, vknot_vec, degree1));
+    // A sample: the control points sliced as `subs` zips them (no further than they go).
+    let sample = |(first0, basis0): (usize, &[f64]), (first1, basis1): (usize, &[f64])| {
+        let lines = control_points.get(first0..(first0 + basis0.len()).min(control_points.len())).unwrap_or_default();
+        lines.iter().zip(basis0).fold(P::origin(), |sum, (line, b0)| {
+            let line = line.get(first1..(first1 + basis1.len()).min(line.len())).unwrap_or_default();
+            line.iter().zip(basis1).fold(sum, |sum, (pt, b1)| {
+                if *b0 == 0.0 || *b1 == 0.0 { sum } else { sum + pt.to_vec() * (b0 * b1) }
+            })
+        })
+    };
+    // Rows in runs that share their basis functions' window (a knot span), each with the lower
+    // bound of its samples' distances: none when the bound does not hold.
+    // (Every sample then a convex combination of the control points it sums: none cut off.)
+    let (c0, c1) = columns.iter().fold((usize::MAX, 0), |(a, b), (_, (f, w, _))| (a.min(*f), b.max(f + w.len())));
+    let fits = rows.iter().all(|(_, (f, w, _))| f + w.len() <= control_points.len())
+        && control_points.iter().all(|line| c1 <= line.len());
+    let unity = fits && rows.iter().all(|(_, w)| w.2) && columns.iter().all(|(_, w)| w.2);
+    let mut runs: Vec<(f64, Range<usize>)> = Vec::new();
+    let mut i = 0;
+    while i < rows.len() {
+        let key = rows.get(i).map(|(_, (f, w, _))| (*f, w.len()));
+        let end = (i..rows.len()).find(|k| rows.get(*k).map(|(_, (f, w, _))| (*f, w.len())) != key).unwrap_or(rows.len());
+        let bound = match (unity, key) {
+            (true, Some((f, n))) => {
+                let lines = control_points.get(f..(f + n).min(control_points.len())).unwrap_or_default();
+                let pts: Vec<P> = lines.iter().flat_map(|l| l.get(c0..c1.min(l.len())).unwrap_or_default()).copied().collect();
+                let n = pts.len().max(1) as f64;
+                let centre = pts.iter().fold(P::origin(), |c, p| c + p.to_vec() / n);
+                let radius = pts.iter().map(|p| centre.distance(*p)).fold(0.0, f64::max);
+                // Less a margin far above the rounding of these sums and distances.
+                let d = centre.distance(point);
+                let scale = d + radius + P::origin().distance(point) + P::origin().distance(centre);
+                d - radius - 1e-9 * scale
+            }
+            _ => f64::NEG_INFINITY,
+        };
+        runs.push((bound, i..end));
+        i = end.max(i + 1);
+    }
+    runs.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // The nearest sample, ties to the first in the grid's order, as the grid is walked.
+    let mut best = (f64::INFINITY, usize::MAX, usize::MAX);
+    for (bound, run) in runs {
+        if bound > 0.0 && bound * bound > best.0 {
+            continue;
+        }
+        for i in run {
+            let Some((_, (f0, w0, _))) = rows.get(i) else { continue };
+            for (j, (_, (f1, w1, _))) in columns.iter().enumerate() {
+                let dist = sample((*f0, w0), (*f1, w1)).distance2(point);
+                if dist < best.0 || (dist == best.0 && (i, j) < (best.1, best.2)) {
+                    best = (dist, i, j);
+                }
+            }
+        }
+    }
+    match (rows.get(best.1), columns.get(best.2)) {
+        (Some((u, _)), Some((v, _))) => (*u, *v),
+        _ => (0.0, 0.0),
     }
 }
 

@@ -78,6 +78,16 @@ Changes:
   does. They multiplied by p only, so the second derivatives of every B-spline and NURBS surface
   of degree p ≥ 3 were 1/(p − 1) of their value (a cubic surface's curvature read as half, #763).
   `crates/kernel/src/surface_second_derivative_tests.rs` holds them to finite differences.
+- `nurbs/bspsurface.rs`: a point and the derivatives of a B-spline surface sum only the control
+  points whose basis functions do not vanish there ((p + 1)·(q + 1) of them), in the same order;
+  every control point was summed, so an evaluation of a surface hundreds of spans long (a coil's
+  wall) cost hundreds of times what it needs. The terms left out are exactly zero.
+- `nurbs/bspsurface.rs`: the search from nothing for the nearest point on a B-spline surface
+  samples a direction with more than 25 knot spans twice a span (at most 2048 steps) instead of
+  50 times, with the grid's basis functions found once a row and once a column. On a coil of
+  twenty turns the 50 samples lay about 140° of the helix apart, the nearest one on the next
+  turn, and the search settled there (#3962). Other surfaces are searched as before.
+  `crates/kernel/src/helix.rs` (`a_point_on_a_long_coil_wall_is_found_on_its_own_turn`) holds it.
 
 ## truck-stepio 0.3.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/truck)
 
